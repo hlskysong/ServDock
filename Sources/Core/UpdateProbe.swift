@@ -129,26 +129,33 @@ enum UpdateProbe {
         return lines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    /// 阻塞等待的回调只写一次结果：写入一定发生在 `semaphore.signal()` 之前，
+    /// 读取发生在 `wait()` 之后，先后关系由信号量保证，所以这里的 @unchecked 是安全的。
+    /// 用闭包外层的 `var` 直接存会被判成「mutation of captured var in concurrently-executing code」。
+    private final class CallbackResult: @unchecked Sendable {
+        var payload: Data?
+        var failure: String?
+    }
+
     /// 阻塞式 GET：`error` 非空表示失败，二者必有其一
     private static func perform(_ request: URLRequest) -> (data: Data?, error: String?) {
         let semaphore = DispatchSemaphore(value: 0)
-        var payload: Data?
-        var failure: String?
+        let result = CallbackResult()
 
         let task = URLSession.shared.dataTask(with: request) { data, response, error in
             defer { semaphore.signal() }
             if let error {
-                failure = L.t("无法访问 GitHub：%@", error.localizedDescription)
+                result.failure = L.t("无法访问 GitHub：%@", error.localizedDescription)
                 return
             }
             if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
                 // 404 基本等于「还没发布过 Release」，别让用户以为是网络问题
-                failure = http.statusCode == 404
+                result.failure = http.statusCode == 404
                     ? L.t("还没有发布过版本（仓库未公开或还没有 Release）")
                     : L.t("GitHub 返回 HTTP %d", http.statusCode)
                 return
             }
-            payload = data
+            result.payload = data
         }
         task.resume()
 
@@ -156,10 +163,10 @@ enum UpdateProbe {
             task.cancel()
             return (nil, L.t("请求 GitHub 超时"))
         }
-        if let failure {
+        if let failure = result.failure {
             return (nil, failure)
         }
-        guard let payload else {
+        guard let payload = result.payload else {
             return (nil, L.t("GitHub 没有返回内容"))
         }
         return (payload, nil)
@@ -320,19 +327,19 @@ enum UpdateProbe {
         request.setValue("\(Brand.name)/\(Brand.version)", forHTTPHeaderField: "User-Agent")
 
         let semaphore = DispatchSemaphore(value: 0)
-        var failure: String?
+        let result = CallbackResult()
         let task = URLSession.shared.downloadTask(with: request) { location, response, error in
             defer { semaphore.signal() }
             if let error {
-                failure = error.localizedDescription
+                result.failure = error.localizedDescription
                 return
             }
             if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
-                failure = "HTTP \(http.statusCode)"
+                result.failure = "HTTP \(http.statusCode)"
                 return
             }
             guard let location else {
-                failure = L.t("没有下载到内容")
+                result.failure = L.t("没有下载到内容")
                 return
             }
             do {
@@ -341,7 +348,7 @@ enum UpdateProbe {
                 }
                 try FileManager.default.moveItem(at: location, to: target)
             } catch {
-                failure = error.localizedDescription
+                result.failure = error.localizedDescription
             }
         }
         task.resume()
@@ -350,7 +357,7 @@ enum UpdateProbe {
             task.cancel()
             return L.t("下载超时")
         }
-        if let failure { return L.t("下载失败：%@", failure) }
+        if let failure = result.failure { return L.t("下载失败：%@", failure) }
         return nil
     }
 

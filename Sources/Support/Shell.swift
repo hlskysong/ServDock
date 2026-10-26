@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 /// 命令执行结果
 struct CommandResult: Sendable {
@@ -152,7 +153,9 @@ enum Shell {
         process.environment = env
         if let cwd { process.currentDirectoryURL = URL(fileURLWithPath: cwd) }
 
-        var timedOut = false
+        // 超时标志要在后台闭包里置位、在等待结束后读取，用锁而不是裸 var
+        // （裸 var 会被判成 mutation of captured var in concurrently-executing code）
+        let timedOut = OSAllocatedUnfairLock(initialState: false)
         do {
             try process.run()
         } catch {
@@ -164,7 +167,7 @@ enum Shell {
         if timeout > 0 {
             DispatchQueue.global().asyncAfter(deadline: .now() + timeout) {
                 if process.isRunning {
-                    timedOut = true
+                    timedOut.withLock { $0 = true }
                     process.terminate()
                 }
             }
@@ -177,7 +180,7 @@ enum Shell {
         let out = (try? String(contentsOf: outURL, encoding: .utf8)) ?? ""
         var err = (try? String(contentsOf: errURL, encoding: .utf8)) ?? ""
         var status = process.terminationStatus
-        if timedOut {
+        if timedOut.withLock({ $0 }) {
             status = -2
             err = L.t("命令超时（%d 秒）\n", Int(timeout)) + err
         }

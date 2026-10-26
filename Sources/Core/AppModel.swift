@@ -288,7 +288,11 @@ final class AppModel: ObservableObject {
         ]
         for name in names {
             let token = NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
-                Task { @MainActor in self?.wake() }
+                // 不能在内层并发闭包里直接读外层捕获的 weak self：weak 捕获在编译器眼里是
+                // 可变存储，会报 "reference to captured var 'self' in concurrently-executing code"。
+                // 先提升成强引用常量，Task 捕获的是 let，旧编译器（Swift 5.10）也放行。
+                guard let model = self else { return }
+                Task { @MainActor in model.wake() }
             }
             activityObservers.append(token)
         }
