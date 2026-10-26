@@ -1,0 +1,3 @@
+build/
+*.png.bak
+.DS_Store
