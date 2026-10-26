@@ -161,12 +161,47 @@ struct PillButton: View {
     }
 }
 
+/// 顶部统计卡（概览 / 定时任务共用同一尺寸，避免两边各写一份慢慢走偏）
+struct MetricPill: View {
+    var label: String
+    var value: String
+    var tint: Color
+    var symbol: String
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: symbol)
+                .font(.system(size: 14.5, weight: .medium))
+                .foregroundStyle(tint)
+                .frame(width: 17)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(value)
+                    .font(.system(size: 20, weight: .bold))
+                    .monospacedDigit()
+                    .foregroundStyle(Theme.textPrimary)
+                Text(label)
+                    .font(.system(size: 10.5, weight: .medium))
+                    .foregroundStyle(Theme.textSecondary)
+                    .lineLimit(1)
+                    .fixedSize(horizontal: true, vertical: false)
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 9)
+        .frame(minWidth: 122, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 11, style: .continuous).fill(Theme.card))
+        .overlay(RoundedRectangle(cornerRadius: 11, style: .continuous).strokeBorder(Theme.border, lineWidth: 1))
+    }
+}
+
 /// 纯图标圆形按钮
 struct IconButton: View {
     var systemImage: String
     var tint: Color = Theme.textSecondary
     var size: CGFloat = 26
     var help: String?
+    /// 转圈：把「正在刷新」画在按钮上，不额外占位，也不改动任何布局
+    var spinning: Bool = false
     var action: () -> Void
 
     @State private var hovering = false
@@ -176,6 +211,10 @@ struct IconButton: View {
             Image(systemName: systemImage)
                 .font(.system(size: size * 0.42, weight: .medium))
                 .foregroundStyle(hovering ? tint : Theme.textSecondary)
+                .rotationEffect(.degrees(spinning ? 360 : 0))
+                // 停下时不给动画，直接归位；否则会从 360° 反向转回 0°，看着像卡了一下
+                .animation(spinning ? .linear(duration: 1.1).repeatForever(autoreverses: false) : nil,
+                           value: spinning)
                 .frame(width: size, height: size)
                 .background(
                     Circle().fill(hovering ? tint.opacity(0.12) : Color.clear)

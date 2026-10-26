@@ -402,6 +402,7 @@ $BIN --mise-activate [fish|zsh|bash]              # write mise activate into the
 30. **Self-update must not unconditionally replace itself**: clicking "Download & Install" from `build/ServDock.app` would wipe the build output directory. The gate is `canSelfInstall` (path not under `build/` **and** the parent directory writable), otherwise the button degrades to "Open Releases".
 31. **The version must be injected from the tag**: if the tag says `v0.3.0` but Info.plist still says `0.2.0`, the app considers itself outdated forever — it compares against the bundle version. `build.sh` writes `SERVDOCK_VERSION` / `SERVDOCK_BUILD` into Info.plist before signing, and CI `test`s the result.
 32. **The GitHub App connector cannot create repositories**: `POST /user/repos` returns `403 Resource not accessible by integration` (the App only holds the permissions it was granted). Creating repos and releases has to go through the web UI or `gh`; the App token will not do it.
+33. **Never put a refresh indicator inside an `HStack`**: adding `if isRefreshing { ProgressView() }` to the sidebar footer shoves the language button aside and reads as the UI twitching. Draw "refreshing" on the refresh button itself instead (`rotationEffect` + `repeatForever`) — rotation never participates in layout. Pass `nil` rather than `.default` when it stops, otherwise the icon spins backwards from 360° and looks stuck. And do not wire it to the background poll: a 5-second cycle would leave the icon spinning forever, so only manual triggers animate.
 
 ## Known limitations
 

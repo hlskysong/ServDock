@@ -400,6 +400,7 @@ $BIN --mise-activate [fish|zsh|bash]              # 把 mise activate 写进 she
 30. **自更新不能无条件替换自己**：在 `build/ServDock.app` 里点「下载并安装」会把编译产物目录删掉。判据是 `canSelfInstall`（路径不以 `build/` 结尾 **且** 父目录对当前用户可写），不满足时按钮退化成「打开发布页」。
 31. **版本号必须由 tag 注入**：tag 打了 `v0.3.0` 而 Info.plist 还是 `0.2.0`，应用就会永远认为「有新版本」——比较的是 bundle 里的版本。`build.sh` 用 `SERVDOCK_VERSION` / `SERVDOCK_BUILD` 在签名前写入 Info.plist，CI 里还会 `test` 一遍防呆。
 32. **GitHub App 连接器建不了仓库**：`POST /user/repos` 返回 `403 Resource not accessible by integration`（App 只拿到被授予的权限），建仓库 / 建 Release 得走网页或 `gh`，别指望 App token。
+33. **刷新指示器不要塞进 `HStack`**：侧栏底部 `if isRefreshing { ProgressView() }` 一出现就把旁边的语言按钮挤走，肉眼看像界面在抽搐。改法是把「正在刷新」画在刷新按钮自己身上（`rotationEffect` + `repeatForever`），旋转不参与布局计算；停止时动画给 `nil` 而不是 `.default`，否则会从 360° 反向转回 0° 像卡了一下。另外别把后台轮询也接上去——5 秒一轮会让图标一直在转，只给手动触发加转圈。
 
 ## 已知限制
 

@@ -4,6 +4,8 @@ struct TimersView: View {
     @EnvironmentObject var model: AppModel
 
     @State private var logText = ""
+    /// 手动刷新时按钮自己转圈；6 秒自动轮询保持静默
+    @State private var manualRefreshing = false
     private let tick = Timer.publish(every: 6, on: .main, in: .common).autoconnect()
 
     var body: some View {
@@ -47,10 +49,15 @@ struct TimersView: View {
             }
             Spacer(minLength: 12)
             SearchField(text: $model.searchText, placeholder: "搜索任务")
-            IconButton(systemImage: "arrow.clockwise", size: 26, help: "刷新（⌘R）") {
-                Task {
+            IconButton(systemImage: "arrow.clockwise", size: 26, help: "刷新（⌘R）",
+                       spinning: manualRefreshing) {
+                guard !manualRefreshing else { return }
+                manualRefreshing = true
+                Task { @MainActor in
                     await model.loadTimers()
                     await model.refresh(showSpinner: false)
+                    try? await Task.sleep(nanoseconds: 450_000_000)
+                    manualRefreshing = false
                 }
             }
         }
@@ -78,13 +85,16 @@ struct TimersView: View {
 
     private var statsRow: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 9) {
-                metric(L.t("定时触发"), "\(model.timers.jobs.filter { $0.isTimed }.count)", Theme.purple, "calendar.badge.clock")
-                metric(L.t("运行中"), "\(model.timerRunningCount)", Theme.green, "play.circle.fill")
-                metric(L.t("异常"), "\(model.timerProblemCount)",
-                       model.timerProblemCount > 0 ? Theme.red : Theme.textTertiary,
-                       "exclamationmark.triangle.fill")
-                metric(L.t("cron"), "\(model.timers.cron.count)", Theme.blue, "terminal.fill")
+            HStack(spacing: 10) {
+                MetricPill(label: L.t("定时触发"), value: "\(model.timers.jobs.filter { $0.isTimed }.count)",
+                           tint: Theme.purple, symbol: "calendar.badge.clock")
+                MetricPill(label: L.t("运行中"), value: "\(model.timerRunningCount)",
+                           tint: Theme.green, symbol: "play.circle.fill")
+                MetricPill(label: L.t("异常"), value: "\(model.timerProblemCount)",
+                           tint: model.timerProblemCount > 0 ? Theme.red : Theme.textTertiary,
+                           symbol: "exclamationmark.triangle.fill")
+                MetricPill(label: L.t("cron"), value: "\(model.timers.cron.count)",
+                           tint: Theme.blue, symbol: "terminal.fill")
                 Spacer(minLength: 0)
             }
             filterRow
@@ -115,27 +125,6 @@ struct TimersView: View {
         }
         .padding(3)
         .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(Theme.cardSoft))
-    }
-
-    private func metric(_ label: String, _ value: String, _ tint: Color, _ symbol: String) -> some View {
-        HStack(spacing: 7) {
-            Image(systemName: symbol)
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(tint)
-            VStack(alignment: .leading, spacing: 0) {
-                Text(value)
-                    .font(.system(size: 14, weight: .bold))
-                    .monospacedDigit()
-                    .foregroundStyle(Theme.textPrimary)
-                Text(label)
-                    .font(.system(size: 9.5))
-                    .foregroundStyle(Theme.textSecondary)
-            }
-        }
-        .padding(.horizontal, 11)
-        .padding(.vertical, 6)
-        .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(Theme.card))
-        .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous).strokeBorder(Theme.border, lineWidth: 1))
     }
 
     // MARK: 列表

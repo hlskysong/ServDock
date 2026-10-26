@@ -179,12 +179,6 @@ struct SidebarView: View {
                     updateBadge
                 }
                 langButton
-                if model.isRefreshing {
-                    ProgressView()
-                        .controlSize(.mini)
-                        .scaleEffect(0.6)
-                        .frame(width: 10, height: 10)
-                }
             }
             Text(model.lastRefresh.map { L.t("更新于 %@", TimeText.clock($0)) } ?? L.t("等待首次刷新"))
                 .font(.system(size: 9))
@@ -202,13 +196,13 @@ struct SidebarView: View {
         } label: {
             HStack(spacing: 3) {
                 Image(systemName: "arrow.down.circle.fill")
-                    .font(.system(size: 8.5, weight: .bold))
-                Text(model.update.latest)
                     .font(.system(size: 9, weight: .bold))
+                Text(model.update.latest)
+                    .font(.system(size: 10, weight: .bold))
             }
             .foregroundStyle(Theme.amber)
-            .padding(.horizontal, 5)
-            .padding(.vertical, 2)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2.5)
             .background(Capsule().fill(Theme.amber.opacity(0.14)))
         }
         .buttonStyle(.plain)
@@ -223,10 +217,11 @@ struct SidebarView: View {
             }
         } label: {
             Text(model.lang.badge)
-                .font(.system(size: 9, weight: .bold))
+                .font(.system(size: 11, weight: .bold))
                 .foregroundStyle(Theme.accent)
-                .padding(.horizontal, 5)
-                .padding(.vertical, 2)
+                .frame(minWidth: 15)
+                .padding(.horizontal, 7)
+                .padding(.vertical, 3)
                 .background(Capsule().fill(Theme.accent.opacity(0.12)))
         }
         .buttonStyle(.plain)

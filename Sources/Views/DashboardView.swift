@@ -5,6 +5,8 @@ struct DashboardView: View {
 
     @EnvironmentObject var model: AppModel
     @State private var showAllInstallable = false
+    /// 只反映「用户点刷新」这一种情况；后台 5 秒轮询保持静默，不让人以为界面在抽动
+    @State private var manualRefreshing = false
 
     private var title: String { scope?.title ?? L.t("总览") }
 
@@ -56,13 +58,25 @@ struct DashboardView: View {
             ) {
                 model.showOnlyRunning.toggle()
             }
-            IconButton(systemImage: "arrow.clockwise", size: 26, help: "刷新（⌘R）") {
-                Task { await model.refresh(runtimes: true) }
+            IconButton(systemImage: "arrow.clockwise", size: 26, help: "刷新（⌘R）",
+                       spinning: manualRefreshing) {
+                manualRefresh()
             }
         }
         .padding(.horizontal, Metrics.pagePadding)
         .padding(.top, 26)
         .padding(.bottom, 12)
+    }
+
+    /// 手动刷新：转圈画在按钮自己身上，至少转半秒，避免刚好撞上轮询时闪一下
+    private func manualRefresh() {
+        guard !manualRefreshing else { return }
+        manualRefreshing = true
+        Task { @MainActor in
+            await model.refresh(runtimes: true)
+            try? await Task.sleep(nanoseconds: 450_000_000)
+            manualRefreshing = false
+        }
     }
 
     private var hintRow: some View {
@@ -85,34 +99,15 @@ struct DashboardView: View {
     private var installableCount: Int { scopeItems.filter { !$0.installed }.count }
 
     private var statsRow: some View {
-        HStack(spacing: 9) {
-            metric(L.t("运行中"), "\(runningCount)", Theme.green, "play.circle.fill")
-            metric(L.t("已安装"), "\(installedCount)", Theme.blue, "shippingbox.fill")
-            metric(L.t("异常"), "\(problemCount)", problemCount > 0 ? Theme.red : Theme.textTertiary, "exclamationmark.triangle.fill")
-            metric(L.t("可安装"), "\(installableCount)", Theme.purple, "arrow.down.circle.fill")
+        HStack(spacing: 10) {
+            MetricPill(label: L.t("运行中"), value: "\(runningCount)", tint: Theme.green, symbol: "play.circle.fill")
+            MetricPill(label: L.t("已安装"), value: "\(installedCount)", tint: Theme.blue, symbol: "shippingbox.fill")
+            MetricPill(label: L.t("异常"), value: "\(problemCount)",
+                       tint: problemCount > 0 ? Theme.red : Theme.textTertiary,
+                       symbol: "exclamationmark.triangle.fill")
+            MetricPill(label: L.t("可安装"), value: "\(installableCount)", tint: Theme.purple, symbol: "arrow.down.circle.fill")
             Spacer(minLength: 0)
         }
-    }
-
-    private func metric(_ label: String, _ value: String, _ tint: Color, _ symbol: String) -> some View {
-        HStack(spacing: 7) {
-            Image(systemName: symbol)
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(tint)
-            VStack(alignment: .leading, spacing: 0) {
-                Text(value)
-                    .font(.system(size: 14, weight: .bold))
-                    .monospacedDigit()
-                    .foregroundStyle(Theme.textPrimary)
-                Text(label)
-                    .font(.system(size: 9.5))
-                    .foregroundStyle(Theme.textSecondary)
-            }
-        }
-        .padding(.horizontal, 11)
-        .padding(.vertical, 6)
-        .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(Theme.card))
-        .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous).strokeBorder(Theme.border, lineWidth: 1))
     }
 
     // MARK: 服务卡片
