@@ -1,6 +1,6 @@
 # 启服 · ServDock
 
-[中文](README.md) | [English](README.en.md)
+中文 | [English](README.en.md)
 
 macOS 本地服务与运行时控制台：把 **Homebrew services、launchd / cron、Docker / OrbStack 容器、Bun / fnm / mise 版本管理器、Homebrew 包**收在一个窗口里管，并且提供一套**给脚本和 AI 用的 JSON CLI**。
 
