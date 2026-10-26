@@ -6,6 +6,9 @@
 #   SERVDOCK_MIN_MACOS  最低系统版本，默认 14.0
 #   SERVDOCK_VERSION    覆盖 Info.plist 的 CFBundleShortVersionString（CI 用 tag 注入）
 #   SERVDOCK_BUILD      覆盖 CFBundleVersion
+#   SERVDOCK_SIGN_IDENTITY  codesign 身份，如 "Developer ID Application: Foo (TEAMID)"；
+#                        不设则 ad-hoc 签名（本机可用，分发需手动绕过 Gatekeeper）
+#   SERVDOCK_HARDENED   设 1（默认）时对真实证书加 --options runtime，公证要求
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
@@ -65,7 +68,20 @@ if [ -n "${SERVDOCK_VERSION:-}" ]; then
     /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${SERVDOCK_BUILD:-1}" "$PLIST"
 fi
 
-echo "==> 签名（ad-hoc）"
-codesign --force --sign - --timestamp=none "$APP" >/dev/null 2>&1 || true
+# 没配证书就 ad-hoc 签名（本机自用够了，但别人下载后要手动绕过 Gatekeeper）；
+# 配了 SERVDOCK_SIGN_IDENTITY 就走 Developer ID + hardened runtime + 时间戳，才能公证
+SIGN_IDENTITY="${SERVDOCK_SIGN_IDENTITY:--}"
+if [ "$SIGN_IDENTITY" = "-" ]; then
+    echo "==> 签名（ad-hoc）"
+    codesign --force --sign - --timestamp=none "$APP" >/dev/null 2>&1 || true
+else
+    echo "==> 签名（${SIGN_IDENTITY}）"
+    SIGN_ARGS=(--force --sign "$SIGN_IDENTITY" --timestamp)
+    if [ "${SERVDOCK_HARDENED:-1}" = "1" ]; then
+        SIGN_ARGS+=(--options runtime)
+    fi
+    codesign "${SIGN_ARGS[@]}" "$APP"
+    codesign --verify --strict "$APP"
+fi
 
 echo "==> 完成：$APP"

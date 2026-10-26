@@ -43,6 +43,38 @@ jobs:
           echo "build=${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
           echo "版本号：$VERSION (build ${GITHUB_RUN_NUMBER})"
 
+      - name: Import signing certificate (optional)
+        id: sign
+        env:
+          CERT_P12: ${{ secrets.MACOS_CERT_P12 }}
+          CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [ -z "${CERT_P12:-}" ]; then
+            echo "未配置 MACOS_CERT_P12，本次走 ad-hoc 签名（首次打开需右键 → 打开）"
+            echo "has_cert=0" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          KEYCHAIN="$RUNNER_TEMP/servdock-signing.keychain-db"
+          echo "$CERT_P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security create-keychain -p actions "$KEYCHAIN"
+          security set-keychain-settings -lut 3600 "$KEYCHAIN"
+          security unlock-keychain -p actions "$KEYCHAIN"
+          security import "$RUNNER_TEMP/cert.p12" -k "$KEYCHAIN" -P "$CERT_PASSWORD" \
+            -T /usr/bin/codesign -T /usr/bin/security
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k actions "$KEYCHAIN" >/dev/null
+          security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
+          IDENTITY="$(security find-identity -v -p codesigning "$KEYCHAIN" \
+            | sed -n 's/.*"\(Developer ID Application: .*\)"/\1/p' | head -1)"
+          if [ -z "$IDENTITY" ]; then
+            echo "证书已导入但没找到 Developer ID Application 身份" >&2
+            exit 1
+          fi
+          echo "签名身份：$IDENTITY"
+          echo "SERVDOCK_SIGN_IDENTITY=$IDENTITY" >> "$GITHUB_ENV"
+          echo "has_cert=1" >> "$GITHUB_OUTPUT"
+          rm -f "$RUNNER_TEMP/cert.p12"
+
       - name: Build universal app
         env:
           SERVDOCK_ARCHS: "arm64 x86_64"
@@ -74,6 +106,32 @@ jobs:
           shasum -a 256 "$ZIP" | tee "$ZIP.sha256"
           ls -lh "$ZIP"
           echo "ZIP=$ZIP" >> "$GITHUB_ENV"
+
+      - name: Notarize (optional)
+        if: steps.sign.outputs.has_cert == '1'
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [ -z "${APPLE_ID:-}" ] || [ -z "${APPLE_TEAM_ID:-}" ] || [ -z "${APPLE_APP_PASSWORD:-}" ]; then
+            echo "已签名但缺少 APPLE_ID / APPLE_TEAM_ID / APPLE_APP_PASSWORD，跳过公证"
+            echo "> 本次构建已签名但未公证，首次打开仍需右键 → 打开。" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          xcrun notarytool submit "$ZIP" \
+            --apple-id "$APPLE_ID" \
+            --team-id "$APPLE_TEAM_ID" \
+            --password "$APPLE_APP_PASSWORD" \
+            --wait --timeout 30m
+          xcrun stapler staple build/ServDock.app
+          xcrun stapler validate build/ServDock.app
+          # staple 会改写 bundle，得重新打包并重算校验和
+          rm -f "$ZIP"
+          ditto -c -k --keepParent build/ServDock.app "$ZIP"
+          shasum -a 256 "$ZIP" | tee "$ZIP.sha256"
+          echo "> 已签名并公证，可直接双击打开。" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4

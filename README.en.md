@@ -2,9 +2,25 @@
 
 English | [中文](README.md)
 
+[![Release](https://img.shields.io/github/v/release/hlskysong/ServDock?include_prereleases&sort=semver)](https://github.com/hlskysong/ServDock/releases)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Platform](https://img.shields.io/badge/platform-macOS%2014%2B-lightgrey.svg)](#install)
+
 A local service and runtime console for macOS. It puts **Homebrew services, launchd / cron jobs, Docker / OrbStack containers, Bun / fnm / mise version managers and Homebrew packages** into one window — and ships a **JSON CLI built for scripts and AI agents**.
 
 The interaction model is inspired by [FlyEnv](https://github.com/FlyEnvApp/FlyEnv), but the app is **SwiftUI compiled directly with `swiftc`** — no Xcode project, no SPM third-party dependencies.
+
+## Install
+
+Grab `ServDock-<version>.zip` from [Releases](https://github.com/hlskysong/ServDock/releases), unzip it and drag `ServDock.app` into `/Applications`.
+
+Builds are ad-hoc signed by default, so the first launch is stopped by Gatekeeper once: right-click → Open → Open. Or clear the quarantine flag:
+
+```bash
+xattr -dr com.apple.quarantine /Applications/ServDock.app
+```
+
+You can verify the download against the `.sha256` shipped with the release: `shasum -a 256 -c ServDock-0.3.0.zip.sha256`.
 
 ![Overview](docs/screenshots/overview.png)
 
@@ -36,8 +52,9 @@ bash run.sh            # compile and restart
 
 Requirements: macOS 14+, Command Line Tools (`xcode-select --install`). A full Xcode install is not needed.
 
-`build.sh` honours three environment variables: `SERVDOCK_ARCHS="arm64 x86_64"` (multiple architectures are merged into a
-universal binary with `lipo`), and `SERVDOCK_VERSION` / `SERVDOCK_BUILD` (override the version in Info.plist — CI injects them from the tag).
+`build.sh` honours these environment variables: `SERVDOCK_ARCHS="arm64 x86_64"` (multiple architectures are merged into a
+universal binary with `lipo`), `SERVDOCK_VERSION` / `SERVDOCK_BUILD` (override the version in Info.plist — CI injects them from the tag),
+`SERVDOCK_SIGN_IDENTITY` (real signing identity; omitted means ad-hoc) and `SERVDOCK_MIN_MACOS` (defaults to 14.0).
 
 ## Release & Updates
 
@@ -68,6 +85,22 @@ Pure CLI check:
 ```bash
 $BIN update --json          # {current, latest, state, update_available, asset, can_self_install, skipped, page_url}
 ```
+
+**Signing & notarization (optional)**: builds are ad-hoc signed by default — fine for personal use, but other people get one
+Gatekeeper prompt. For proper distribution, add these repository secrets (`Settings → Secrets and variables → Actions`) and the
+pipeline switches to Developer ID signing + notarization automatically. Each step is skipped when its secret is missing, so a
+partially configured repo still releases fine:
+
+| Secret | Value |
+| --- | --- |
+| `MACOS_CERT_P12` | the exported Developer ID Application `.p12`, base64-encoded on one line (`base64 -i cert.p12 \| pbcopy`) |
+| `MACOS_CERT_PASSWORD` | password chosen when exporting the p12 |
+| `APPLE_ID` | Apple ID used for notarization |
+| `APPLE_TEAM_ID` | Team ID (the value in parentheses of the certificate name) |
+| `APPLE_APP_PASSWORD` | app-specific password from appleid.apple.com |
+
+With a certificate but no Apple account you get signing without notarization. Once notarization passes, the bundle is
+`stapler staple`d, re-zipped and the `.sha256` is recomputed.
 
 
 ## Features
@@ -383,4 +416,9 @@ $BIN --mise-activate [fish|zsh|bash]              # write mise activate into the
 - The icon and UI are designed light-first; dark mode is adapted but not pixel-polished
 - Self-update only "replaces the .app and relaunches": no delta updates, no signature verification (ad-hoc signed — compare the release `sha256` by hand); development builds are not allowed to self-replace
 - Update checks hit the public GitHub API (60 requests/hour unauthenticated — plenty at one check per 24h); restricted networks or proxies may fail, and the reason is shown right in Settings
-- Releases are universal arm64 + x86_64, but ad-hoc signed without notarization, so the first launch still needs right-click → Open to get past Gatekeeper
+- Releases are universal arm64 + x86_64, ad-hoc signed by default; signing + notarization only kick in once the certificate and notary secrets are configured (see Release & Updates), otherwise the first launch still needs right-click → Open to get past Gatekeeper
+
+## License
+
+[MIT](LICENSE) © 2026 hlskysong
+

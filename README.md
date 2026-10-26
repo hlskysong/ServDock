@@ -2,11 +2,27 @@
 
 中文 | [English](README.en.md)
 
+[![Release](https://img.shields.io/github/v/release/hlskysong/ServDock?include_prereleases&sort=semver)](https://github.com/hlskysong/ServDock/releases)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Platform](https://img.shields.io/badge/platform-macOS%2014%2B-lightgrey.svg)](#安装)
+
 macOS 本地服务与运行时控制台：把 **Homebrew services、launchd / cron、Docker / OrbStack 容器、Bun / fnm / mise 版本管理器、Homebrew 包**收在一个窗口里管，并且提供一套**给脚本和 AI 用的 JSON CLI**。
 
 参考 [FlyEnv](https://github.com/FlyEnvApp/FlyEnv) 的交互思路，用 **SwiftUI + swiftc 直接编译**，不依赖 Xcode 工程、不依赖 SPM 第三方库。
 
 ![总览](docs/screenshots/overview.png)
+
+## 安装
+
+从 [Releases](https://github.com/hlskysong/ServDock/releases) 下 `ServDock-<版本>.zip`，解压后把 `ServDock.app` 拖进「应用程序」。
+
+默认是 ad-hoc 签名，首次打开会被 Gatekeeper 拦一次：右键 → 「打开」→ 再点「打开」。命令行绕过也行：
+
+```bash
+xattr -dr com.apple.quarantine /Applications/ServDock.app
+```
+
+下载后可先用 Release 附带的 `.sha256` 校验完整性：`shasum -a 256 -c ServDock-0.3.0.zip.sha256`。
 
 ## 进度
 
@@ -36,8 +52,9 @@ bash run.sh            # 编译并重启
 
 环境要求：macOS 14+、CommandLineTools（`xcode-select --install`），无需完整 Xcode。
 
-`build.sh` 支持三个环境变量：`SERVDOCK_ARCHS="arm64 x86_64"`（多架构时用 `lipo` 合成通用二进制）、
-`SERVDOCK_VERSION` / `SERVDOCK_BUILD`（覆盖 Info.plist 里的版本号，CI 用 tag 注入）。
+`build.sh` 支持这些环境变量：`SERVDOCK_ARCHS="arm64 x86_64"`（多架构时用 `lipo` 合成通用二进制）、
+`SERVDOCK_VERSION` / `SERVDOCK_BUILD`（覆盖 Info.plist 里的版本号，CI 用 tag 注入）、
+`SERVDOCK_SIGN_IDENTITY`（真实签名身份，不填就走 ad-hoc）、`SERVDOCK_MIN_MACOS`（默认 14.0）。
 
 ## 发布与更新
 
@@ -65,6 +82,20 @@ git push origin v0.3.0      # 触发 .github/workflows/release.yml
 ```bash
 $BIN update --json          # {current, latest, state, update_available, asset, can_self_install, skipped, page_url}
 ```
+
+**签名与公证（可选）**：默认 ad-hoc 签名，自己用没问题，别人下载要过一次 Gatekeeper。要做正式分发，
+在仓库 `Settings → Secrets and variables → Actions` 里配这几个，流水线会自动切到 Developer ID 签名 + 公证；
+缺哪个就跳过哪一步，不会失败：
+
+| Secret | 内容 |
+| --- | --- |
+| `MACOS_CERT_P12` | Developer ID Application 证书导出的 `.p12`，base64 后一行（`base64 -i cert.p12 \| pbcopy`） |
+| `MACOS_CERT_PASSWORD` | 导出 p12 时设的密码 |
+| `APPLE_ID` | 公证用的 Apple ID |
+| `APPLE_TEAM_ID` | Team ID（证书名括号里那串） |
+| `APPLE_APP_PASSWORD` | App 专用密码，appleid.apple.com 生成 |
+
+配了证书没配 Apple 账号时只签名不公证；公证通过后会 `stapler staple` 再重新打包，`.sha256` 也跟着重算。
 
 
 ## 功能
@@ -383,4 +414,9 @@ $BIN --mise-activate [fish|zsh|bash]              # 把 mise activate 写进 she
 - 图标与界面按浅色为主设计，深色模式已适配但未做逐像素打磨
 - 自更新只做「替换 .app 并重启」：不增量、不校验签名（ad-hoc 签名，只能人工比对 Release 附带的 sha256），开发构建不允许自替换
 - 更新检测走 GitHub 公共 API（未认证配额 60 次/小时，24 小时一次的节奏够用），内网 / 代理环境可能连不上，失败原因会直接显示在设置页
-- Release 是通用的 arm64 + x86_64 包，但 ad-hoc 签名没做 notarization，首次打开仍需右键「打开」绕过 Gatekeeper
+- Release 是通用 arm64 + x86_64 包；默认 ad-hoc 签名，只有配好证书与公证 Secrets 才会自动签 + 公证（见「发布与更新」），没配之前首次打开仍需右键「打开」绕过 Gatekeeper
+
+## 许可
+
+[MIT](LICENSE) © 2026 hlskysong
+
