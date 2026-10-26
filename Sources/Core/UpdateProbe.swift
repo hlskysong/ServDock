@@ -253,6 +253,7 @@ enum UpdateProbe {
         }
 
         let extractDir = workDir.appendingPathComponent("extract", isDirectory: true)
+        try? fm.createDirectory(at: extractDir, withIntermediateDirectories: true)
         let unzip = Shell.run("/usr/bin/ditto", ["-x", "-k", zipURL.path, extractDir.path], timeout: 90)
         guard unzip.ok else {
             return .failed(L.t("解包失败：%@", Summarize.error(unzip.errorText)))
@@ -274,6 +275,7 @@ enum UpdateProbe {
         PID="$1"
         TARGET="$2"
         SOURCE="$3"
+        WORK="$4"
         for _ in $(seq 1 120); do
             if ! kill -0 "$PID" 2>/dev/null; then break; fi
             sleep 0.25
@@ -283,6 +285,8 @@ enum UpdateProbe {
         /usr/bin/ditto "$SOURCE" "$TARGET"
         /usr/bin/xattr -dr com.apple.quarantine "$TARGET" 2>/dev/null || true
         /usr/bin/open "$TARGET"
+        # 脚本自己就在 WORK 里，等它读完再删
+        ( sleep 2; rm -rf "$WORK" ) >/dev/null 2>&1 &
         """
         do {
             try script.write(to: scriptURL, atomically: true, encoding: .utf8)
@@ -294,7 +298,7 @@ enum UpdateProbe {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/bash")
         process.arguments = [scriptURL.path, String(ProcessInfo.processInfo.processIdentifier),
-                             appBundlePath, newApp.path]
+                             appBundlePath, newApp.path, workDir.path]
         process.standardInput = FileHandle.nullDevice
         process.standardOutput = FileHandle.nullDevice
         process.standardError = FileHandle.nullDevice
