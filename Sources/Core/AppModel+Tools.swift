@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 
 // MARK: - EasyTier / Homebrew 包 / mise 的数据加载与动作
@@ -291,6 +292,85 @@ extension AppModel {
             show(.error(verb.failed(container.name, Summarize.error(result.errorText))))
         }
         await loadDocker()
+    }
+
+    // MARK: 版本更新
+
+    /// 启动时按 24 小时节流自动查一次
+    func checkUpdateIfDue() async {
+        guard UpdateProbe.isDue(last: UpdateProbe.lastCheck) else {
+            // 上次结果已经过期很久不再提示，但跳过名单要恢复
+            updateSkipped = UpdateProbe.skippedVersion == update.latest
+            return
+        }
+        await checkUpdate(silent: true)
+    }
+
+    func checkUpdate(silent: Bool = false) async {
+        guard !updateChecking else { return }
+        updateChecking = true
+        let snapshot = await Task.detached(priority: .userInitiated) {
+            UpdateProbe.fetchLatest()
+        }.value
+        update = snapshot
+        updateChecking = false
+        UpdateProbe.markChecked()
+        updateSkipped = UpdateProbe.skippedVersion == snapshot.latest && snapshot.hasUpdate
+
+        guard !silent else { return }
+        switch snapshot.state {
+        case .available:
+            show(.info(L.t("发现新版本 %@", snapshot.latest)))
+        case .upToDate:
+            show(.success(L.t("已是最新版本 %@", snapshot.current)))
+        case .failed:
+            show(.error(snapshot.error ?? L.t("检查更新失败")))
+        case .idle:
+            break
+        }
+    }
+
+    /// 下载并替换自身：成功时替换脚本已拉起，这里退出应用让它接管
+    func installUpdate() async {
+        guard !updateInstalling, update.hasUpdate else { return }
+        guard update.canSelfInstall else {
+            openReleasePage()
+            show(.info(L.t("当前构建不支持自动替换，已打开发布页手动下载")))
+            return
+        }
+        updateInstalling = true
+        let snapshot = update
+        let outcome = await Task.detached(priority: .userInitiated) {
+            UpdateProbe.downloadAndInstall(snapshot)
+        }.value
+        updateInstalling = false
+
+        switch outcome {
+        case .readyToRestart:
+            show(.success(L.t("%@ 下载完成，正在重启以完成更新", snapshot.latest)))
+            try? await Task.sleep(nanoseconds: 900_000_000)
+            NSApp.terminate(nil)
+        case .failed(let message):
+            show(.error(message))
+        }
+    }
+
+    func skipUpdate() {
+        guard update.hasUpdate else { return }
+        UpdateProbe.skippedVersion = update.latest
+        updateSkipped = true
+        show(.info(L.t("已跳过 %@，下次检查仍会提醒", update.latest)))
+    }
+
+    func unskipUpdate() {
+        UpdateProbe.skippedVersion = nil
+        updateSkipped = false
+    }
+
+    func openReleasePage() {
+        let url = update.pageURL.isEmpty ? Brand.releasesPage : update.pageURL
+        guard let target = URL(string: url) else { return }
+        openURL(target)
     }
 
     // MARK: 语言

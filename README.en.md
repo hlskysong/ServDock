@@ -24,6 +24,7 @@ The interaction model is inspired by [FlyEnv](https://github.com/FlyEnvApp/FlyEn
 | 10 | Resource footprint (brew cache + adaptive polling) | ✅ Done |
 | 11 | Docker / OrbStack container management (containers, images, engine state) | ✅ Done |
 | 12 | JSON CLI for scripts and AI (subcommands + unified envelope + exit codes) | ✅ Done |
+| 13 | Version check and self-update (GitHub Release + universal binary + one-click replace & relaunch) | ✅ Done |
 
 ## Build & Run
 
@@ -34,6 +35,40 @@ bash run.sh            # compile and restart
 ```
 
 Requirements: macOS 14+, Command Line Tools (`xcode-select --install`). A full Xcode install is not needed.
+
+`build.sh` honours three environment variables: `SERVDOCK_ARCHS="arm64 x86_64"` (multiple architectures are merged into a
+universal binary with `lipo`), and `SERVDOCK_VERSION` / `SERVDOCK_BUILD` (override the version in Info.plist — CI injects them from the tag).
+
+## Release & Updates
+
+**Releasing**: tag and push — GitHub Actions does the rest.
+
+```bash
+git tag v0.3.0
+git push origin v0.3.0      # triggers .github/workflows/release.yml
+```
+
+The pipeline: compile arm64 + x86_64 on `macos-14` → `lipo` into a universal binary → assert bundle version and architectures →
+`ditto -c -k --keepParent` into `ServDock-<version>.zip` plus `.sha256` → create the GitHub Release (auto-generated notes; a version
+containing `-` is marked as a prerelease). You can also run it manually via `workflow_dispatch` with an explicit version. `ci.yml`
+covers compile checks on every push / PR so broken commits don't surface only after release.
+
+**Update check**: at launch the app queries `api.github.com/repos/hlskysong/ServDock/releases/latest` at most once every **24 hours**
+(not part of the service polling loop, so `--bench` subprocess counts are unaffected) and compares `tag_name` against
+`CFBundleShortVersionString` segment by segment. An amber version badge appears in the sidebar footer, the Settings page reports an
+available update, and "Skip This Version" is remembered in `UserDefaults` (still re-checked 24h later, and can be undone).
+
+**One-click update**: download the `.zip` → `ditto` extract → verify the version inside the archive matches the release → write a
+replace script that waits for the old process to exit (`rm -rf` old bundle → `ditto` new bundle → strip quarantine → `open`), then quit
+so the script can take over. A development build (`build/ServDock.app`) **never** replaces itself — the button degrades to
+"Open Releases" so the build directory is never destroyed.
+
+Pure CLI check:
+
+```bash
+$BIN update --json          # {current, latest, state, update_available, asset, can_self_install, skipped, page_url}
+```
+
 
 ## Features
 
@@ -147,6 +182,15 @@ Action commands (service lifecycle, container operations, timers) **read the rea
 - **On-demand probing**: timers, EasyTier, mise and the package list only run when their page is opened or a manual refresh happens — never in the polling loop
 - Measured with `--bench`: subprocesses per collection cycle **6 → 4**, wall clock **940 ms → 532 ms**; `brew list --versions` alone went from 332 ms to 0 ms
 
+**Version updates (stage 13)**
+
+- **Zero polling**: one GitHub Release check per 24 hours after launch; "Check for Updates" in Settings runs it on demand
+- Three touch points: amber version badge in the sidebar footer (opens Settings), the "Updates" card in Settings (current / latest / published / last checked / release notes), and `update --json`
+- **Skip This Version**: stored in `UserDefaults`; the 24h check still reminds you about other versions, and skipping can be undone
+- **One-click replace**: download zip → unpack → verify inner version → wait for self to exit → replace bundle → strip quarantine → relaunch
+- Self-replace is gated: only outside `build/` and only when the containing directory is writable, otherwise the button becomes "Open Releases"
+- Version comparison is numeric per segment (`0.10.0 > 0.9.1`), not string ordering
+
 ## Screenshots
 
 | Timers | cron |
@@ -201,6 +245,7 @@ Sources/
     BrewCatalog.swift        # brew search / info --json=v2 / installed enumeration / install & uninstall (with tap-trust retry)
     MiseProbe.swift          # mise doctor / ls --json / registry search / install, upgrade, uninstall / shell activation
     DockerProbe.swift        # docker CLI lookup, engine probing, container / image / df parsing, container and OrbStack actions
+    UpdateProbe.swift        # GitHub Release version check, semver compare, download / unpack / self-replace
     LogLocator.swift         # log discovery, tail and config reading
     AppModel.swift           # state machine: adaptive polling (4s foreground / 30s background), 90s runtime cache
     AppModel+Actions.swift   # start/stop (routed by hosting mode), install, Bun upgrade, Node version actions
@@ -217,6 +262,9 @@ Sources/
     Summarize.swift          # output first line / error summarization
   Views/                     # sidebar, overview, cards, detail, timers, Docker, EasyTier, packages, mise, settings, runtime pages, components
 Tools/make-icon.swift        # generates AppIcon.icns
+.github/workflows/
+  ci.yml                     # compile check + CLI smoke test on push / PR
+  release.yml                # tag v* → universal binary → zip + sha256 → GitHub Release
 ```
 
 ## Command line
@@ -245,6 +293,7 @@ $BIN timers --json
 $BIN timer run com.example.job             # run|load|unload|enable|disable
 $BIN runtime --json                        # bun / node / mise overview
 $BIN doctor --json                         # environment health check
+$BIN update --json                         # check the GitHub release (read-only, no install)
 $BIN help --json                           # command list (for AI self-discovery)
 ```
 
@@ -315,6 +364,10 @@ $BIN --mise-activate [fish|zsh|bash]              # write mise activate into the
 26. **A stopped container's `Status` is `Exited (0) 2 minutes ago`**: with a narrow column the ellipsis eats the important part. The status column keeps only `Exited (0)`; running containers keep `Up 2 minutes`.
 27. **`docker` hangs for seconds before failing when the engine is down**: probe timeouts must be short (12s) or the UI feels frozen; folding the socket-path error into 3 lines makes "not started" versus "wrong permissions" obvious.
 28. **`Never`-returning CLI helpers collapse branches early**: declaring `emit()` / `fail()` as `-> Never` (calling `exit()` internally) lets `guard ... else { fail(...) }` compile without a pointless `return` — but note the compiler knows code after `if json { emit(...) }` is unreachable, so do not put required logic there.
+29. **`Result<Data, String>` does not compile**: `Result`'s `Failure` must conform to `Error`, and `String` does not (`type 'String' does not conform to protocol 'Error'`). Either define an `Error` type or just return a `(data, error)` tuple — both the API call and the download here are blocking, so the tuple is less ceremony.
+30. **Self-update must not unconditionally replace itself**: clicking "Download & Install" from `build/ServDock.app` would wipe the build output directory. The gate is `canSelfInstall` (path not under `build/` **and** the parent directory writable), otherwise the button degrades to "Open Releases".
+31. **The version must be injected from the tag**: if the tag says `v0.3.0` but Info.plist still says `0.2.0`, the app considers itself outdated forever — it compares against the bundle version. `build.sh` writes `SERVDOCK_VERSION` / `SERVDOCK_BUILD` into Info.plist before signing, and CI `test`s the result.
+32. **The GitHub App connector cannot create repositories**: `POST /user/repos` returns `403 Resource not accessible by integration` (the App only holds the permissions it was granted). Creating repos and releases has to go through the web UI or `gh`; the App token will not do it.
 
 ## Known limitations
 
@@ -328,3 +381,6 @@ $BIN --mise-activate [fish|zsh|bash]              # write mise activate into the
 - Only Chinese and English are supported, keyed by the Chinese source string; new strings must be added to `L10nDictionary.swift` (missing entries fall back to Chinese instead of crashing)
 - The Homebrew packages page only searches, installs and uninstalls plus lists installed packages — no bulk `brew upgrade`
 - The icon and UI are designed light-first; dark mode is adapted but not pixel-polished
+- Self-update only "replaces the .app and relaunches": no delta updates, no signature verification (ad-hoc signed — compare the release `sha256` by hand); development builds are not allowed to self-replace
+- Update checks hit the public GitHub API (60 requests/hour unauthenticated — plenty at one check per 24h); restricted networks or proxies may fail, and the reason is shown right in Settings
+- Releases are universal arm64 + x86_64, but ad-hoc signed without notarization, so the first launch still needs right-click → Open to get past Gatekeeper

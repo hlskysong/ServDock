@@ -118,6 +118,14 @@ final class AppModel: ObservableObject {
 
     @Published var lang: Lang = L10n.current
 
+    // MARK: 版本更新
+
+    @Published var update = UpdateSnapshot()
+    @Published var updateChecking = false
+    @Published var updateInstalling = false
+    /// 用户选择了「跳过此版本」
+    @Published var updateSkipped = false
+
     enum TimerScopeFilter: String, CaseIterable, Identifiable {
         case all
         case timed
@@ -225,6 +233,10 @@ final class AppModel: ObservableObject {
                 if self.isRefreshing { continue }
                 await self.refresh(showSpinner: false)
             }
+        }
+        // 版本检测：进主循环后单独跑一次，24 小时节流，不参与服务轮询
+        Task { [weak self] in
+            await self?.checkUpdateIfDue()
         }
     }
 

@@ -80,6 +80,9 @@ enum CLIRunner {
         case "doctor":
             doctor(json: json)
 
+        case "update", "check-update":
+            updateCheck(json: json)
+
         default:
             fail("bad_usage", "未知命令：\(command)（执行 help 查看可用命令）", json: json, exitCode: 2)
         }
@@ -496,6 +499,47 @@ enum CLIRunner {
         exit(0)
     }
 
+    // MARK: - 版本更新
+
+    /// 只查询、不安装：脚本和 AI 拿到版本差异与下载地址后自己决定怎么做
+    private static func updateCheck(json: Bool) {
+        let snapshot = UpdateProbe.fetchLatest()
+        let assetPayload: Any
+        if let asset = snapshot.asset {
+            assetPayload = ["name": asset.name, "url": asset.url, "size": asset.size]
+        } else {
+            assetPayload = NSNull()
+        }
+        let payload: [String: Any] = [
+            "current": snapshot.current,
+            "latest": snapshot.latest.isEmpty ? NSNull() : snapshot.latest,
+            "state": snapshot.state.rawValue,
+            "update_available": snapshot.hasUpdate,
+            "release_name": snapshot.releaseName,
+            "published_at": snapshot.publishedAt.isEmpty ? NSNull() : snapshot.publishedAt,
+            "page_url": snapshot.pageURL.isEmpty ? Brand.releasesPage : snapshot.pageURL,
+            "asset": assetPayload,
+            "can_self_install": snapshot.canSelfInstall,
+            "skipped": UpdateProbe.skippedVersion == snapshot.latest,
+            "error": snapshot.error ?? NSNull()
+        ]
+
+        let human: String
+        switch snapshot.state {
+        case .available:
+            human = "\(snapshot.current) -> \(snapshot.latest)"
+                + "  可更新" + (snapshot.asset.map { "（\($0.name) \($0.sizeText)）" } ?? "")
+                + (snapshot.canSelfInstall ? "" : "  仅手动安装")
+        case .upToDate:
+            human = "已是最新版本 \(snapshot.current)"
+        case .failed:
+            human = "检查更新失败：\(snapshot.error ?? "unknown")"
+        case .idle:
+            human = "未检查"
+        }
+        emit("update", payload, json: json, human: human)
+    }
+
     // MARK: - 帮助
 
     private static func printUsage(json: Bool) {
@@ -518,7 +562,8 @@ enum CLIRunner {
             ["name": "timer", "usage": "timer <run|load|unload|enable|disable> <label> [--json]",
              "desc": "定时任务操作"],
             ["name": "runtime", "usage": "runtime [--json]", "desc": "bun / node / mise 运行时概览"],
-            ["name": "doctor", "usage": "doctor [--json]", "desc": "环境体检（brew / docker / mise / EasyTier / 定时任务）"]
+            ["name": "doctor", "usage": "doctor [--json]", "desc": "环境体检（brew / docker / mise / EasyTier / 定时任务）"],
+            ["name": "update", "usage": "update [--json]", "desc": "检查 GitHub Release 是否有新版本"]
         ]
 
         if json {
@@ -557,6 +602,7 @@ enum CLIRunner {
             ("运行时 / 诊断", [
                 ("runtime", "bun / node / mise 概览"),
                 ("doctor", "环境体检"),
+                ("update", "检查新版本（只查询，不安装）"),
             ]),
             ("全局", [
                 ("--json", "输出机器可读 JSON（信封：ok / schema / command / data）"),

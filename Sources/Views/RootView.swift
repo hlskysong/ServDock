@@ -175,6 +175,9 @@ struct SidebarView: View {
                     .foregroundStyle(Theme.textSecondary)
                     .lineLimit(1)
                 Spacer(minLength: 0)
+                if model.update.hasUpdate, !model.updateSkipped {
+                    updateBadge
+                }
                 langButton
                 if model.isRefreshing {
                     ProgressView()
@@ -190,6 +193,26 @@ struct SidebarView: View {
         .padding(.horizontal, 13)
         .padding(.top, 9)
         .padding(.bottom, 11)
+    }
+
+    /// 有新版本时侧栏底部直接给个入口（点了进设置页）
+    private var updateBadge: some View {
+        Button {
+            model.selection = .settings
+        } label: {
+            HStack(spacing: 3) {
+                Image(systemName: "arrow.down.circle.fill")
+                    .font(.system(size: 8.5, weight: .bold))
+                Text(model.update.latest)
+                    .font(.system(size: 9, weight: .bold))
+            }
+            .foregroundStyle(Theme.amber)
+            .padding(.horizontal, 5)
+            .padding(.vertical, 2)
+            .background(Capsule().fill(Theme.amber.opacity(0.14)))
+        }
+        .buttonStyle(.plain)
+        .help(L.t("有新版本 %@", model.update.latest))
     }
 
     /// 侧栏底部一键切中英

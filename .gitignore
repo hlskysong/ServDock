@@ -1,3 +1,7 @@
 build/
-*.png.bak
 .DS_Store
+*.png.bak
+
+# 本地手工打包产物（正式包由 CI 产出并挂到 Release）
+ServDock-*.zip
+ServDock-*.zip.sha256

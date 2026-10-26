@@ -13,8 +13,20 @@ enum Brand {
 
     /// 版本号以 Info.plist 为准，命令行/关于页共用
     static var version: String {
-        (Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String) ?? "0.2.0"
+        (Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String) ?? "0.0.0"
     }
+
+    static var buildNumber: String {
+        (Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String) ?? "1"
+    }
+
+    // MARK: - 发布渠道（GitHub Releases）
+
+    static let githubOwner = "hlskysong"
+    static let githubRepo = "ServDock"
+    static let repoSlug = githubOwner + "/" + githubRepo
+    static let releasesPage = "https://github.com/" + repoSlug + "/releases"
+    static let latestReleaseAPI = "https://api.github.com/repos/" + repoSlug + "/releases/latest"
 
     // MARK: - 目录
 

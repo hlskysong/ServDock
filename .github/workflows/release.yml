@@ -1,0 +1,98 @@
+name: Release
+
+# 打 tag 即发布：push v0.3.0 → 构建通用二进制 → 打包 zip → 创建 GitHub Release
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "不带 v 的版本号（例如 0.3.0）"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Build & publish
+    runs-on: macos-14
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve version
+        id: meta
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION="${{ inputs.version }}"
+          else
+            VERSION="${GITHUB_REF_NAME#v}"
+          fi
+          if [ -z "$VERSION" ]; then
+            echo "无法确定版本号" >&2
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "build=${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
+          echo "版本号：$VERSION (build ${GITHUB_RUN_NUMBER})"
+
+      - name: Build universal app
+        env:
+          SERVDOCK_ARCHS: "arm64 x86_64"
+          SERVDOCK_VERSION: ${{ steps.meta.outputs.version }}
+          SERVDOCK_BUILD: ${{ steps.meta.outputs.build }}
+        run: bash build.sh
+
+      - name: Verify bundle
+        run: |
+          set -euo pipefail
+          APP=build/ServDock.app
+          test -x "$APP/Contents/MacOS/ServDock"
+          ARCHS="$(lipo -archs "$APP/Contents/MacOS/ServDock")"
+          echo "archs: $ARCHS"
+          case "$ARCHS" in
+            *arm64*x86_64*|*x86_64*arm64*) ;;
+            *) echo "不是通用二进制：$ARCHS" >&2; exit 1 ;;
+          esac
+          BUNDLE_VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP/Contents/Info.plist")"
+          echo "bundle version: $BUNDLE_VERSION"
+          test "$BUNDLE_VERSION" = "${{ steps.meta.outputs.version }}"
+          "$APP/Contents/MacOS/ServDock" version --json
+
+      - name: Package
+        run: |
+          set -euo pipefail
+          ZIP="ServDock-${{ steps.meta.outputs.version }}.zip"
+          ditto -c -k --keepParent build/ServDock.app "$ZIP"
+          shasum -a 256 "$ZIP" | tee "$ZIP.sha256"
+          ls -lh "$ZIP"
+          echo "ZIP=$ZIP" >> "$GITHUB_ENV"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ServDock-${{ steps.meta.outputs.version }}
+          path: |
+            ${{ env.ZIP }}
+            ${{ env.ZIP }}.sha256
+          retention-days: 14
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.meta.outputs.version }}
+          name: ServDock ${{ steps.meta.outputs.version }}
+          files: |
+            ${{ env.ZIP }}
+            ${{ env.ZIP }}.sha256
+          fail_on_unmatched_files: true
+          generate_release_notes: true
+          draft: false
+          prerelease: ${{ contains(steps.meta.outputs.version, '-') }}

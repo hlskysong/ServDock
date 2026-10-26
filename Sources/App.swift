@@ -6,7 +6,7 @@ import SwiftUI
 @main
 enum Entry {
     static func main() {
-        let args = CommandLine.arguments
+        var args = CommandLine.arguments
 
         // 改名遗留：老数据目录 / 日志目录合并到新目录（幂等，不覆盖）
         Brand.migrateLegacyDataIfNeeded()
@@ -15,6 +15,8 @@ enum Entry {
             if let lang = Lang(rawValue: args[index + 1]) {
                 L10n.setLanguage(lang)
             }
+            // 先把 --lang 摘掉，否则 `ServDock --lang en list` 会被当成「无子命令」直接开 GUI
+            args.removeSubrange(index...(index + 1))
         }
 
         // 子命令式 CLI（给脚本 / AI 用）：ServDock list --json

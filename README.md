@@ -24,6 +24,7 @@ macOS 本地服务与运行时控制台：把 **Homebrew services、launchd / cr
 | 10 | 资源占用（brew 缓存 + 前后台自适应轮询） | ✅ 完成 |
 | 11 | Docker / OrbStack 容器管理（容器、镜像、引擎状态） | ✅ 完成 |
 | 12 | 面向脚本与 AI 的 JSON CLI（子命令 + 统一信封 + 退出码） | ✅ 完成 |
+| 13 | 版本检测与自更新（GitHub Release + 通用二进制 + 一键替换重启） | ✅ 完成 |
 
 ## 构建与运行
 
@@ -34,6 +35,37 @@ bash run.sh            # 编译并重启
 ```
 
 环境要求：macOS 14+、CommandLineTools（`xcode-select --install`），无需完整 Xcode。
+
+`build.sh` 支持三个环境变量：`SERVDOCK_ARCHS="arm64 x86_64"`（多架构时用 `lipo` 合成通用二进制）、
+`SERVDOCK_VERSION` / `SERVDOCK_BUILD`（覆盖 Info.plist 里的版本号，CI 用 tag 注入）。
+
+## 发布与更新
+
+**发布**：打 tag 就发，其余交给 GitHub Actions：
+
+```bash
+git tag v0.3.0
+git push origin v0.3.0      # 触发 .github/workflows/release.yml
+```
+
+流水线做的事：`macos-14` 上编 arm64 + x86_64 两个架构 → `lipo` 合成通用二进制 → 校验 bundle 版本与架构 →
+`ditto -c -k --keepParent` 打出 `ServDock-<版本>.zip` + `.sha256` → 创建 GitHub Release（自动生成变更说明，版本号带 `-` 视为预发布）。
+也可以在 Actions 页面手动 `workflow_dispatch` 填版本号发一版。`ci.yml` 负责 push / PR 的编译校验，防止推上去才发现编不过。
+
+**更新检测**：应用启动后按 **24 小时节流**查一次 `api.github.com/repos/hlskysong/ServDock/releases/latest`
+（不参与服务轮询，也不占用 `--bench` 的子进程预算），拿 `tag_name` 与 `CFBundleShortVersionString` 逐段数字比较。
+侧栏底部出现琥珀色版本徽标、设置页给出「有可用更新」，可「跳过此版本」（记在 UserDefaults，下次仍会提醒）。
+
+**一键更新**：下载 `.zip` → `ditto` 解包 → 校验包内版本与 Release 声明一致 →
+写一个等待旧进程退出的替换脚本（`rm -rf` 旧 bundle → `ditto` 新 bundle → 去 quarantine → `open`），应用随即退出交接。
+开发构建（`build/ServDock.app`）**不会**替换自己，按钮自动退化成「打开发布页」，避免把编译目录干掉。
+
+也可以纯命令行查：
+
+```bash
+$BIN update --json          # {current, latest, state, update_available, asset, can_self_install, skipped, page_url}
+```
+
 
 ## 功能
 
@@ -150,6 +182,15 @@ eval "$(mise activate bash)"         # bash
 - **按需探测**：定时任务、EasyTier、mise、Homebrew 包列表都只在进入对应页面或手动刷新时才跑，不参与轮询
 - 实测（`--bench`）：单轮采集子进程 **6 → 4 个**、墙钟 **940 ms → 532 ms**；其中 `brew list --versions` 单项就从 332 ms 降到 0 ms
 
+**版本更新（阶段 13）**
+
+- **零轮询**：启动后 24 小时节流查一次 GitHub Release，设置页「检查更新」可随时手动查
+- 三处提示：侧栏底部琥珀色版本徽标（点了进设置页）、设置页「版本更新」卡片（当前 / 最新 / 发布时间 / 上次检查 / 更新说明）、`update --json`
+- **跳过此版本**：记进 UserDefaults，下次 24 小时后的检查仍会提醒，随时可取消跳过
+- **一键替换**：下载 zip → 解包 → 校验包内版本 → 等待自身退出后替换 bundle → 去 quarantine → 重新打开
+- 自替换有闸门：只有非 `build/` 目录、且所在目录对当前用户可写时才允许，否则退化成「打开发布页」
+- 版本比较是逐段数字比较（`0.10.0 > 0.9.1`），不依赖字符串排序
+
 ## 界面
 
 | 定时任务 | cron 定时任务 |
@@ -204,6 +245,7 @@ Sources/
     BrewCatalog.swift        # brew search / info --json=v2 / 已安装枚举 / 安装卸载（含 tap 信任重试）
     MiseProbe.swift          # mise doctor / ls --json / registry 搜索 / 安装升级卸载 / shell 激活检测
     DockerProbe.swift        # docker CLI 定位、引擎探测、容器 / 镜像 / df 解析、容器与 OrbStack 动作
+    UpdateProbe.swift        # GitHub Release 版本检测、语义化版本比较、下载 / 解包 / 替换自身
     LogLocator.swift         # 日志定位与 tail / 配置读取
     AppModel.swift           # 状态机：自适应轮询（前台 4s / 后台 30s），90s 缓存运行时
     AppModel+Actions.swift   # 启停（按托管方式分流）、安装、Bun 升级、Node 版本操作
@@ -220,6 +262,9 @@ Sources/
     Summarize.swift          # 输出首行 / 错误摘要
   Views/                     # 侧边栏、总览、卡片、详情、定时任务、Docker、EasyTier、Homebrew 包、mise、设置、运行时页、组件
 Tools/make-icon.swift        # 生成 AppIcon.icns
+.github/workflows/
+  ci.yml                     # push / PR 编译校验 + CLI 冒烟
+  release.yml                # tag v* → 通用二进制 → zip + sha256 → GitHub Release
 ```
 
 ## 命令行
@@ -248,6 +293,7 @@ $BIN timers --json
 $BIN timer run com.example.job             # run|load|unload|enable|disable
 $BIN runtime --json                        # bun / node / mise 概览
 $BIN doctor --json                         # 环境体检
+$BIN update --json                         # 检查 GitHub Release（只查询，不安装）
 $BIN help --json                           # 命令清单（给 AI 自发现）
 ```
 
@@ -318,6 +364,10 @@ $BIN --mise-activate [fish|zsh|bash]              # 把 mise activate 写进 she
 26. **容器已停止时的 `Status` 是 `Exited (0) 2 minutes ago`**：列宽不够就被省略号吃掉关键信息。状态列只取 `Exited (0)` 这一段，运行中的 `Up 2 minutes` 才保留。
 27. **引擎没起来时 `docker` 会卡几秒才报错**：探测超时要给短（12s），否则 UI 像卡死；同时把 socket 路径的报错折叠展示，能直接判断是「没启动」还是「权限不对」。
 28. **CLI 的 `Never` 返回函数让分支提前收敛**：`emit()` / `fail()` 声明成 `-> Never`（内部 `exit()`），`guard ... else { fail(...) }` 就能直接通过编译，不用写无意义的 `return`——但要注意 `if json { emit(...) }` 之后的代码编译器知道「永远到不了」，别在里面放真正需要的逻辑。
+29. **`Result<Data, String>` 编译不过**：`Result` 的 `Failure` 必须满足 `Error`，`String` 不满足（报 `type 'String' does not conform to protocol 'Error'`）。要么自定义 Error 类型，要么直接返回 `(data, error)` 元组——这块网络与下载都是阻塞调用，元组更省事。
+30. **自更新不能无条件替换自己**：在 `build/ServDock.app` 里点「下载并安装」会把编译产物目录删掉。判据是 `canSelfInstall`（路径不以 `build/` 结尾 **且** 父目录对当前用户可写），不满足时按钮退化成「打开发布页」。
+31. **版本号必须由 tag 注入**：tag 打了 `v0.3.0` 而 Info.plist 还是 `0.2.0`，应用就会永远认为「有新版本」——比较的是 bundle 里的版本。`build.sh` 用 `SERVDOCK_VERSION` / `SERVDOCK_BUILD` 在签名前写入 Info.plist，CI 里还会 `test` 一遍防呆。
+32. **GitHub App 连接器建不了仓库**：`POST /user/repos` 返回 `403 Resource not accessible by integration`（App 只拿到被授予的权限），建仓库 / 建 Release 得走网页或 `gh`，别指望 App token。
 
 ## 已知限制
 
@@ -331,3 +381,6 @@ $BIN --mise-activate [fish|zsh|bash]              # 把 mise activate 写进 she
 - 多语言只做中英两种，词条以中文原文为 key；新增文案要同步补 `L10nDictionary.swift`（缺词回落中文，不会崩）
 - Homebrew 包页只做 search / install / uninstall 与已安装列表，不做 `brew upgrade` 批量升级
 - 图标与界面按浅色为主设计，深色模式已适配但未做逐像素打磨
+- 自更新只做「替换 .app 并重启」：不增量、不校验签名（ad-hoc 签名，只能人工比对 Release 附带的 sha256），开发构建不允许自替换
+- 更新检测走 GitHub 公共 API（未认证配额 60 次/小时，24 小时一次的节奏够用），内网 / 代理环境可能连不上，失败原因会直接显示在设置页
+- Release 是通用的 arm64 + x86_64 包，但 ad-hoc 签名没做 notarization，首次打开仍需右键「打开」绕过 Gatekeeper

@@ -11,6 +11,7 @@ struct SettingsView: View {
             ScrollView(.vertical, showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 14) {
                     languageSection
+                    updateSection
                     aboutSection
                 }
                 .padding(.horizontal, Metrics.pagePadding)
@@ -90,6 +91,132 @@ struct SettingsView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+    }
+
+    // MARK: - 版本更新
+
+    private var updateSection: some View {
+        VStack(alignment: .leading, spacing: 9) {
+            SectionLabel(text: L.t("版本更新"), trailing: updateTintText)
+            VStack(spacing: 0) {
+                KeyValueRow(label: L.t("当前版本"), value: "\(Brand.version) (\(Brand.buildNumber))", mono: true)
+                divider
+                KeyValueRow(label: L.t("最新版本"), value: latestVersionText, mono: true)
+                if !model.update.publishedAt.isEmpty, model.update.state != .idle {
+                    divider
+                    KeyValueRow(label: L.t("发布时间"), value: shortDate(model.update.publishedAt))
+                }
+                if let checked = model.update.checkedAt {
+                    divider
+                    KeyValueRow(label: L.t("上次检查"), value: TimeText.stamp(checked))
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 4)
+            .cardSurface()
+
+            if model.update.hasUpdate, !model.update.notes.isEmpty {
+                releaseNotes
+            }
+
+            HStack(spacing: 6) {
+                PillButton(
+                    title: "检查更新",
+                    systemImage: "arrow.triangle.2.circlepath",
+                    compact: true,
+                    loading: model.updateChecking
+                ) {
+                    Task { await model.checkUpdate() }
+                }
+                if model.update.hasUpdate {
+                    PillButton(
+                        title: model.update.canSelfInstall ? "下载并安装" : "打开发布页",
+                        systemImage: model.update.canSelfInstall ? "arrow.down.circle.fill" : "safari",
+                        kind: .primary,
+                        compact: true,
+                        loading: model.updateInstalling
+                    ) {
+                        if model.update.canSelfInstall {
+                            Task { await model.installUpdate() }
+                        } else {
+                            model.openReleasePage()
+                        }
+                    }
+                    if model.update.canSelfInstall {
+                        PillButton(title: "打开发布页", systemImage: "safari", compact: true) {
+                            model.openReleasePage()
+                        }
+                    }
+                    PillButton(
+                        title: model.updateSkipped ? "取消跳过" : "跳过此版本",
+                        systemImage: model.updateSkipped ? "arrow.uturn.backward" : "bell.slash",
+                        kind: .ghost,
+                        compact: true
+                    ) {
+                        if model.updateSkipped {
+                            model.unskipUpdate()
+                        } else {
+                            model.skipUpdate()
+                        }
+                    }
+                }
+            }
+            .padding(.top, 2)
+        }
+    }
+
+    private var releaseNotes: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(L.t("更新说明"))
+                .font(.system(size: 9.5, weight: .semibold))
+                .foregroundStyle(Theme.textTertiary)
+            Text(model.update.notes)
+                .font(.system(size: 10.5))
+                .foregroundStyle(Theme.textSecondary)
+                .lineLimit(6)
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(10)
+        .background(
+            RoundedRectangle(cornerRadius: 9, style: .continuous).fill(Theme.cardSoft)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 9, style: .continuous).strokeBorder(Theme.border, lineWidth: 1)
+        )
+    }
+
+    private var latestVersionText: String {
+        if model.updateChecking { return L.t("检查中…") }
+        switch model.update.state {
+        case .idle:
+            return "—"
+        case .available:
+            return model.updateSkipped
+                ? L.t("%@（已跳过）", model.update.latest)
+                : model.update.latest
+        case .upToDate:
+            return model.update.latest.isEmpty ? Brand.version : model.update.latest
+        case .failed:
+            return model.update.error ?? L.t("检查失败")
+        }
+    }
+
+    private var updateTintText: String? {
+        if model.updateChecking { return L.t("检查中…") }
+        switch model.update.state {
+        case .available: return model.updateSkipped ? L.t("已跳过") : L.t("有可用更新")
+        case .upToDate: return L.t("已是最新")
+        case .failed: return L.t("检查失败")
+        case .idle: return nil
+        }
+    }
+
+    /// GitHub 的 `published_at` 是 ISO8601，取到分钟就够
+    private func shortDate(_ iso: String) -> String {
+        let formatter = ISO8601DateFormatter()
+        guard let date = formatter.date(from: iso) else { return iso }
+        return TimeText.stamp(date)
     }
 
     private var aboutSection: some View {

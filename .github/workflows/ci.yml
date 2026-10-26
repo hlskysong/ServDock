@@ -1,0 +1,32 @@
+name: CI
+
+# 推 main 和 PR 都编译一遍，防止「代码推到线上才发现编不过」
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build (arm64)
+    runs-on: macos-14
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build
+        env:
+          SERVDOCK_ARCHS: "arm64"
+        run: bash build.sh
+
+      - name: Smoke test CLI
+        run: |
+          set -euo pipefail
+          BIN=build/ServDock.app/Contents/MacOS/ServDock
+          "$BIN" version --json
+          "$BIN" help --json > /dev/null
+          echo "CLI ok"
