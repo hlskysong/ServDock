@@ -67,7 +67,8 @@ git push origin v0.3.0      # 触发 .github/workflows/release.yml
 
 流水线做的事：`macos-14` 上编 arm64 + x86_64 两个架构 → `lipo` 合成通用二进制 → 校验 bundle 版本与架构 →
 `ditto -c -k --keepParent` 打出 `ServDock-<版本>.zip` + `.sha256` → 创建 GitHub Release（自动生成变更说明，版本号带 `-` 视为预发布）。
-也可以在 Actions 页面手动 `workflow_dispatch` 填版本号发一版。`ci.yml` 负责 push / PR 的编译校验，防止推上去才发现编不过。
+也可以在 Actions 页面手动 `workflow_dispatch` 填版本号发一版。`ci.yml` 负责 push / PR 的编译校验，防止推上去才发现编不过；
+两条流水线失败时都会把构建日志尾部自动贴成 **commit comment**（Actions 日志只有仓库管理员能下载，这样公开仓库的 CI 失败谁都能查）。
 
 **更新检测**：应用启动后按 **24 小时节流**查一次 `api.github.com/repos/hlskysong/ServDock/releases/latest`
 （不参与服务轮询，也不占用 `--bench` 的子进程预算），拿 `tag_name` 与 `CFBundleShortVersionString` 逐段数字比较。

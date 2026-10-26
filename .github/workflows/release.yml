@@ -22,10 +22,20 @@ concurrency:
 jobs:
   release:
     name: Build & publish
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
+
+      - name: Toolchain
+        run: |
+          {
+            echo "=== 环境 ==="
+            sw_vers
+            echo "xcode-select: $(xcode-select -p 2>&1)"
+            swiftc --version 2>&1 | head -2
+            echo "sdk: $(xcrun --show-sdk-path 2>&1)"
+          } | tee build.log
 
       - name: Resolve version
         id: meta
@@ -80,7 +90,9 @@ jobs:
           SERVDOCK_ARCHS: "arm64 x86_64"
           SERVDOCK_VERSION: ${{ steps.meta.outputs.version }}
           SERVDOCK_BUILD: ${{ steps.meta.outputs.build }}
-        run: bash build.sh
+        run: |
+          set -o pipefail
+          bash build.sh 2>&1 | tee -a build.log
 
       - name: Verify bundle
         run: |
@@ -154,3 +166,36 @@ jobs:
           generate_release_notes: true
           draft: false
           prerelease: ${{ contains(steps.meta.outputs.version, '-') }}
+
+      # 日志默认只有 admin 能看，失败时把尾部贴到 commit comment，谁都能读
+      - name: Report failure log
+        if: failure()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ ! -s build.log ]; then
+            echo "没有 build.log，跳过"
+            exit 0
+          fi
+          python3 - <<'PY'
+          import json, os, urllib.request
+
+          text = open("build.log", encoding="utf-8", errors="replace").read()
+          body = "发布流水线失败，日志尾部：\n\n```\n" + text[-8000:] + "\n```"
+          req = urllib.request.Request(
+              "https://api.github.com/repos/{}/commits/{}/comments".format(
+                  os.environ["GITHUB_REPOSITORY"], os.environ["GITHUB_SHA"]),
+              data=json.dumps({"body": body}).encode("utf-8"),
+              headers={
+                  "Authorization": "Bearer " + os.environ["GH_TOKEN"],
+                  "Accept": "application/vnd.github+json",
+                  "X-GitHub-Api-Version": "2022-11-28",
+                  "Content-Type": "application/json",
+              },
+              method="POST",
+          )
+          with urllib.request.urlopen(req) as resp:
+              print("commit comment:", resp.status)
+          PY
+

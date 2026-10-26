@@ -7,21 +7,37 @@ on:
   pull_request:
   workflow_dispatch:
 
+# 失败时要把构建日志贴成 commit comment（公开仓库匿名可读），
+# 否则 Actions 日志只有仓库管理员能下载，排查 CI 只能靠猜
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build:
     name: Build (arm64)
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
+
+      - name: Toolchain
+        run: |
+          {
+            echo "=== 环境 ==="
+            sw_vers
+            echo "xcode-select: $(xcode-select -p 2>&1)"
+            echo "swiftc: $(xcrun --find swiftc 2>&1)"
+            swiftc --version 2>&1 | head -2
+            echo "sdk: $(xcrun --show-sdk-path 2>&1)"
+            echo "bash: $(/bin/bash --version | head -1)"
+          } | tee build.log
 
       - name: Build
         env:
           SERVDOCK_ARCHS: "arm64"
-        run: bash build.sh
+        run: |
+          set -o pipefail
+          bash build.sh 2>&1 | tee -a build.log
 
       - name: Smoke test CLI
         run: |
@@ -30,3 +46,35 @@ jobs:
           "$BIN" version --json
           "$BIN" help --json > /dev/null
           echo "CLI ok"
+
+      # 日志默认只有 admin 能看，失败时把尾部贴到 commit comment，谁都能读
+      - name: Report failure log
+        if: failure()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ ! -s build.log ]; then
+            echo "没有 build.log，跳过"
+            exit 0
+          fi
+          python3 - <<'PY'
+          import json, os, urllib.request
+
+          text = open("build.log", encoding="utf-8", errors="replace").read()
+          body = "CI 构建失败，日志尾部：\n\n```\n" + text[-8000:] + "\n```"
+          req = urllib.request.Request(
+              "https://api.github.com/repos/{}/commits/{}/comments".format(
+                  os.environ["GITHUB_REPOSITORY"], os.environ["GITHUB_SHA"]),
+              data=json.dumps({"body": body}).encode("utf-8"),
+              headers={
+                  "Authorization": "Bearer " + os.environ["GH_TOKEN"],
+                  "Accept": "application/vnd.github+json",
+                  "X-GitHub-Api-Version": "2022-11-28",
+                  "Content-Type": "application/json",
+              },
+              method="POST",
+          )
+          with urllib.request.urlopen(req) as resp:
+              print("commit comment:", resp.status)
+          PY

@@ -68,7 +68,8 @@ git push origin v0.3.0      # triggers .github/workflows/release.yml
 The pipeline: compile arm64 + x86_64 on `macos-14` → `lipo` into a universal binary → assert bundle version and architectures →
 `ditto -c -k --keepParent` into `ServDock-<version>.zip` plus `.sha256` → create the GitHub Release (auto-generated notes; a version
 containing `-` is marked as a prerelease). You can also run it manually via `workflow_dispatch` with an explicit version. `ci.yml`
-covers compile checks on every push / PR so broken commits don't surface only after release.
+covers compile checks on every push / PR so broken commits don't surface only after release. Both workflows post the tail of the
+build log as a **commit comment** on failure — Actions logs are admin-only, so this keeps CI failures readable on a public repo.
 
 **Update check**: at launch the app queries `api.github.com/repos/hlskysong/ServDock/releases/latest` at most once every **24 hours**
 (not part of the service polling loop, so `--bench` subprocess counts are unaffected) and compares `tag_name` against
