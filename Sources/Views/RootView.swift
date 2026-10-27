@@ -123,7 +123,7 @@ struct SidebarView: View {
                     .foregroundStyle(Theme.textTertiary)
             }
             Spacer(minLength: 0)
-            IconButton(systemImage: "gearshape", size: 22, help: L.t("设置")) {
+            IconButton(systemImage: "gearshape", tint: Theme.accent, size: 30, help: L.t("设置")) {
                 model.selection = .settings
             }
         }
